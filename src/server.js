@@ -28,7 +28,53 @@ const PYTHON_API =
    MIDDLEWARE
 ========================================================= */
 
-app.use(cors());
+/* =========================================================
+   CORS
+========================================================= */
+
+const allowedOrigins = [
+  "https://portfrontend-delta.vercel.app",
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Postman / server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn(
+        "❌ CORS blocked origin:",
+        origin
+      );
+
+      return callback(
+        new Error("Not allowed by CORS")
+      );
+    },
+
+    credentials: true,
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
+  })
+);
 
 app.use(
   express.json({
