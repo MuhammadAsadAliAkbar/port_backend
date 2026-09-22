@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import cloudinary from "../config/cloudinary.js";
 
 /* =========================================================
    GENERATE JWT
@@ -26,6 +27,23 @@ const generateToken = (user) => {
 
 export const registerUser = async (req, res) => {
   try {
+    console.log("========================================");
+    console.log("REGISTER REQUEST");
+    console.log("========================================");
+
+    console.log("BODY:", req.body);
+    console.log(
+      "FILE:",
+      req.file
+        ? {
+            fieldname: req.file.fieldname,
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+          }
+        : "No avatar"
+    );
+
     const {
       name,
       email,
@@ -68,7 +86,8 @@ export const registerUser = async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters.",
+        message:
+          "Password must be at least 6 characters.",
       });
     }
 
@@ -93,7 +112,8 @@ export const registerUser = async (req, res) => {
     if (!emailRegex.test(email.trim())) {
       return res.status(400).json({
         success: false,
-        message: "Please enter a valid email address.",
+        message:
+          "Please enter a valid email address.",
       });
     }
 
@@ -121,18 +141,54 @@ export const registerUser = async (req, res) => {
     }
 
     /* =====================================================
+       CLOUDINARY AVATAR
+    ===================================================== */
+
+   let avatarUrl = "";
+
+if (req.file) {
+  const uploadResult = await new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "message-chat/avatars",
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(result);
+        }
+      }
+    );
+
+    stream.end(req.file.buffer);
+  });
+
+  avatarUrl = uploadResult.secure_url;
+}
+
+    /* =====================================================
        HASH PASSWORD
     ===================================================== */
 
-    const hashedPassword = await bcrypt.hash(
-      password,
-      12
-    );
+    const hashedPassword =
+      await bcrypt.hash(password, 12);
 
-      const confirmHashedPassword = await bcrypt.hash(
-      confirmPassword,
-      12
-    );
+    /*
+      NOTE:
+      confirmPassword ko normally DB mein store
+      nahi karna chahiye.
+
+      Lekin aapke current schema mein required hai,
+      isliye existing structure ko maintain kar raha hoon.
+    */
+
+    const confirmHashedPassword =
+      await bcrypt.hash(
+        confirmPassword,
+        12
+      );
 
     /* =====================================================
        CREATE USER
@@ -140,11 +196,28 @@ export const registerUser = async (req, res) => {
 
     const user = await User.create({
       name: cleanName,
+
       email: cleanEmail,
+
+      avatar: avatarUrl,
+
       password: hashedPassword,
+
       confirmPassword: confirmHashedPassword,
+
       role: "user",
+
+      online: false,
+
+      lastSeen: null,
+
+      isActive: true,
     });
+
+    console.log(
+      "User created:",
+      user._id
+    );
 
     /* =====================================================
        JWT
@@ -158,20 +231,49 @@ export const registerUser = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Account created successfully.",
+
+      message:
+        "Account created successfully.",
+
       token,
 
       user: {
         id: user._id,
+
         name: user.name,
+
         email: user.email,
+
+        avatar: user.avatar,
+
         role: user.role,
+
+        online: user.online,
+
+        lastSeen: user.lastSeen,
+
         isActive: user.isActive,
       },
     });
-
   } catch (error) {
-    console.error("Register Error:", error);
+    console.error(
+      "========================================"
+    );
+
+    console.error(
+      "REGISTER ERROR:"
+    );
+
+    console.error(error);
+
+    console.error(
+      "ERROR MESSAGE:",
+      error.message
+    );
+
+    console.error(
+      "========================================"
+    );
 
     /* =====================================================
        MONGO DUPLICATE KEY
@@ -186,13 +288,36 @@ export const registerUser = async (req, res) => {
     }
 
     /* =====================================================
+       VALIDATION ERROR
+    ===================================================== */
+
+    if (error.name === "ValidationError") {
+      const messages = Object.values(
+        error.errors
+      ).map(
+        (item) => item.message
+      );
+
+      return res.status(400).json({
+        success: false,
+        message: messages.join(", "),
+      });
+    }
+
+    /* =====================================================
        SERVER ERROR
     ===================================================== */
 
     return res.status(500).json({
       success: false,
+
       message:
         "Something went wrong while creating your account.",
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };
@@ -293,6 +418,9 @@ export const loginUser = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        avatar: user.avatar || "",
+        online: user.online,
+        lastSeen: user.lastSeen,
         isActive: user.isActive,
       },
     });

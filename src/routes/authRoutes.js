@@ -7,6 +7,7 @@ import {
 } from "../controllers/authController.js";
 
 import protect from "../middleware/authMiddleware.js";
+import upload from "../middleware/upload.js";
 
 const router = express.Router();
 
@@ -16,6 +17,7 @@ const router = express.Router();
 
 router.post(
   "/register",
+  upload.single("avatar"),
   registerUser
 );
 
