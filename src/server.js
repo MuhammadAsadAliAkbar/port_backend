@@ -33,6 +33,8 @@ const PYTHON_API =
 ========================================================= */
 
 const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
   "https://portfrontend-delta.vercel.app",
 ];
 
@@ -48,33 +50,19 @@ app.use(
         return callback(null, true);
       }
 
-      console.warn(
-        "❌ CORS blocked origin:",
-        origin
-      );
-
-      return callback(
-        new Error("Not allowed by CORS")
-      );
+      return callback(new Error("Not allowed by CORS"));
     },
-
     credentials: true,
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
-
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
+      "X-Requested-With",
     ],
   })
 );
+
+
 
 app.use(
   express.json({
