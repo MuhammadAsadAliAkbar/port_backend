@@ -1,57 +1,44 @@
 import mongoose from "mongoose";
 
-const messageSchema =
-  new mongoose.Schema(
-    {
-      messageId: {
-        type: String,
-        required: true,
-        unique: true,
-        index: true,
-      },
-
-      conversationId: {
-        type: String,
-        required: true,
-        index: true,
-      },
-
-      senderId: {
-        type: String,
-        required: true,
-      },
-
-      senderName: {
-        type: String,
-        required: true,
-      },
-
-      senderType: {
-        type: String,
-        enum: [
-          "visitor",
-          "admin",
-        ],
-        required: true,
-      },
-
-      message: {
-        type: String,
-        required: true,
-        trim: true,
-        maxlength: 5000,
-      },
+const messageSchema = new mongoose.Schema(
+  {
+    senderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
 
-    {
-      timestamps: true,
-    }
-  );
+    receiverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
 
-const Message =
-  mongoose.model(
-    "Message",
-    messageSchema
-  );
+    text: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    read: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+messageSchema.index({
+  senderId: 1,
+  receiverId: 1,
+  createdAt: -1,
+});
+
+const Message = mongoose.model(
+  "Message",
+  messageSchema
+);
 
 export default Message;

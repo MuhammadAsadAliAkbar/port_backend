@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import cloudinary from "../config/cloudinary.js";
+import mongoose from "mongoose";
 
 /* =========================================================
    GENERATE JWT
@@ -207,7 +208,7 @@ if (req.file) {
 
       role: "user",
 
-      online: false,
+      online: true,
 
       lastSeen: null,
 
@@ -334,12 +335,20 @@ export const loginUser = async (req, res) => {
       password,
     } = req.body;
 
+    // =====================================================
+    // VALIDATE EMAIL
+    // =====================================================
+
     if (!email || !email.trim()) {
       return res.status(400).json({
         success: false,
         message: "Please enter your email.",
       });
     }
+
+    // =====================================================
+    // VALIDATE PASSWORD
+    // =====================================================
 
     if (!password) {
       return res.status(400).json({
@@ -351,9 +360,9 @@ export const loginUser = async (req, res) => {
     const cleanEmail =
       email.trim().toLowerCase();
 
-    /* =====================================================
-       FIND USER + PASSWORD
-    ===================================================== */
+    // =====================================================
+    // FIND USER
+    // =====================================================
 
     const user = await User.findOne({
       email: cleanEmail,
@@ -362,14 +371,13 @@ export const loginUser = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         success: false,
-        message:
-          "Invalid email or password.",
+        message: "Invalid email or password.",
       });
     }
 
-    /* =====================================================
-       CHECK PASSWORD
-    ===================================================== */
+    // =====================================================
+    // CHECK PASSWORD
+    // =====================================================
 
     const passwordMatch =
       await bcrypt.compare(
@@ -380,32 +388,45 @@ export const loginUser = async (req, res) => {
     if (!passwordMatch) {
       return res.status(401).json({
         success: false,
-        message:
-          "Invalid email or password.",
+        message: "Invalid email or password.",
       });
     }
 
-    /* =====================================================
-       CHECK ACTIVE
-    ===================================================== */
+    // =====================================================
+    // CHECK ACTIVE
+    // =====================================================
 
     if (!user.isActive) {
       return res.status(403).json({
         success: false,
-        message:
-          "Your account has been disabled.",
+        message: "Your account has been disabled.",
       });
     }
 
-    /* =====================================================
-       GENERATE TOKEN
-    ===================================================== */
+    // =====================================================
+    // SET USER ONLINE
+    // =====================================================
+
+    user.online = true;
+
+    // Optional: lastSeen ko login par update kar sakte ho
+    user.lastSeen = new Date();
+
+    await user.save();
+
+    console.log(
+      `User ${user._id} is now ONLINE`
+    );
+
+    // =====================================================
+    // GENERATE TOKEN
+    // =====================================================
 
     const token = generateToken(user);
 
-    /* =====================================================
-       RESPONSE
-    ===================================================== */
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
     return res.status(200).json({
       success: true,
@@ -419,7 +440,10 @@ export const loginUser = async (req, res) => {
         email: user.email,
         role: user.role,
         avatar: user.avatar || "",
+
+        // IMPORTANT
         online: user.online,
+
         lastSeen: user.lastSeen,
         isActive: user.isActive,
       },
@@ -434,6 +458,7 @@ export const loginUser = async (req, res) => {
       success: false,
       message:
         "Something went wrong while logging in.",
+      error: error.message,
     });
   }
 };
@@ -478,6 +503,454 @@ export const getMe = async (req, res) => {
       success: false,
       message:
         "Unable to fetch user information.",
+    });
+  }
+};
+
+/* =========================================================
+   GET ALL USERS
+   GET /api/users
+========================================================= */
+
+export const getUsers = async (req, res) => {
+  try {
+    const currentUserId = req.user?._id;
+
+    /*
+      Query parameters:
+
+      ?search=ahmed
+      ?page=1
+      ?limit=20
+    */
+
+    const {
+      search = "",
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    const pageNumber =
+      Math.max(Number(page) || 1, 1);
+
+    const limitNumber =
+      Math.min(
+        Math.max(Number(limit) || 50, 1),
+        100
+      );
+
+    const skip =
+      (pageNumber - 1) *
+      limitNumber;
+
+    /* =====================================================
+       SEARCH FILTER
+    ===================================================== */
+
+    const filter = {};
+
+    /*
+      Don't show currently logged-in user
+    */
+
+    if (currentUserId) {
+      filter._id = {
+        $ne: currentUserId,
+      };
+    }
+
+    /*
+      Search by name/email
+    */
+
+    if (search.trim()) {
+      filter.$or = [
+        {
+          name: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
+
+        {
+          email: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    /* =====================================================
+       TOTAL USERS
+    ===================================================== */
+
+    const totalUsers =
+      await User.countDocuments(
+        filter
+      );
+
+    /* =====================================================
+       USERS
+    ===================================================== */
+
+    const users =
+      await User.find(filter)
+        .select("-password")
+        .sort({
+          createdAt: -1,
+        })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean();
+
+    /* =====================================================
+       CHAT DATA
+    ===================================================== */
+
+    const usersWithChatData =
+      await Promise.all(
+        users.map(async (user) => {
+          let latestMessage = null;
+          let unread = 0;
+
+          /*
+            If logged-in user exists,
+            find conversation information.
+          */
+
+          if (currentUserId) {
+            latestMessage =
+              await Message.findOne({
+                $or: [
+                  {
+                    senderId:
+                      currentUserId,
+
+                    receiverId:
+                      user._id,
+                  },
+
+                  {
+                    senderId:
+                      user._id,
+
+                    receiverId:
+                      currentUserId,
+                  },
+                ],
+              })
+                .sort({
+                  createdAt: -1,
+                })
+                .lean();
+
+            /*
+              Incoming unread messages
+            */
+
+            unread =
+              await Message.countDocuments(
+                {
+                  senderId:
+                    user._id,
+
+                  receiverId:
+                    currentUserId,
+
+                  read: false,
+                }
+              );
+          }
+
+          /* =================================================
+             AVATAR
+          ================================================= */
+
+          const avatar =
+            user.avatar ||
+            user.name
+              ?.split(" ")
+              .filter(Boolean)
+              .map(
+                (item) =>
+                  item[0]
+              )
+              .join("")
+              .slice(0, 2)
+              .toUpperCase() ||
+            "U";
+
+          /* =================================================
+             RETURN USER
+          ================================================= */
+
+          return {
+            ...user,
+
+            id: user._id,
+
+            avatar,
+
+            online:
+              Boolean(
+                user.isOnline ??
+                user.online ??
+                false
+              ),
+
+            lastMessage:
+              latestMessage?.text ||
+              "",
+
+            lastMessageAt:
+              latestMessage?.createdAt ||
+              null,
+
+            unread,
+          };
+        })
+      );
+
+    /* =====================================================
+       SORT
+       Users with latest messages first
+    ===================================================== */
+
+    usersWithChatData.sort(
+      (a, b) => {
+        if (
+          !a.lastMessageAt &&
+          !b.lastMessageAt
+        ) {
+          return 0;
+        }
+
+        if (!a.lastMessageAt) {
+          return 1;
+        }
+
+        if (!b.lastMessageAt) {
+          return -1;
+        }
+
+        return (
+          new Date(
+            b.lastMessageAt
+          ) -
+          new Date(
+            a.lastMessageAt
+          )
+        );
+      }
+    );
+
+    /* =====================================================
+       RESPONSE
+    ===================================================== */
+
+    return res.status(200).json({
+      success: true,
+
+      users: usersWithChatData,
+
+      pagination: {
+        page: pageNumber,
+
+        limit: limitNumber,
+
+        total: totalUsers,
+
+        totalPages:
+          Math.ceil(
+            totalUsers /
+              limitNumber
+          ),
+
+        hasNextPage:
+          pageNumber <
+          Math.ceil(
+            totalUsers /
+              limitNumber
+          ),
+
+        hasPreviousPage:
+          pageNumber > 1,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "getUsers:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+
+      message:
+        "Failed to fetch users",
+
+      error:
+        process.env.NODE_ENV ===
+        "development"
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+
+
+export const getUserById = async (
+  req,
+  res
+) => {
+  try {
+    const user =
+      await User.findById(
+        req.params.userId
+      ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch user",
+    });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    // ============================================
+    // GET USER ID
+    // ============================================
+
+    const userId =
+      req.body?.userId ||
+      req.user?._id;
+
+    console.log("Logout Request User ID:", userId);
+
+    // ============================================
+    // CHECK USER ID
+    // ============================================
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    // ============================================
+    // CHECK VALID MONGODB OBJECT ID
+    // ============================================
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    // ============================================
+    // FIND USER
+    // ============================================
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // ============================================
+    // UPDATE ONLINE STATUS
+    // ============================================
+
+    user.online = false;
+
+    await user.save();
+
+    console.log(
+      `User ${user._id} is now offline`
+    );
+
+    // ============================================
+    // RESPONSE
+    // ============================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Logout successful",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        online: user.online,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Logout Controller Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Logout failed",
+      error: error.message,
+    });
+  }
+};
+
+export const updateOnlineStatus = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { online } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        online: Boolean(online),
+        lastSeen: online ? null : new Date(),
+      },
+      {
+        new: true,
+      }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update online status",
     });
   }
 };

@@ -4,9 +4,13 @@ import {
   registerUser,
   loginUser,
   getMe,
+  getUsers,
+  updateOnlineStatus,
+  getUserById,
+  logout
 } from "../controllers/authController.js";
 
-import protect from "../middleware/authMiddleware.js";
+import authMiddleware  from "../middleware/authMiddleware.js";
 import upload from "../middleware/upload.js";
 
 const router = express.Router();
@@ -32,8 +36,29 @@ router.post(
 
 router.get(
   "/me",
-  protect,
+  authMiddleware,
   getMe
+);
+
+router.get(
+  "/",
+  getUsers
+);
+
+router.get(
+  "/:userId",
+  authMiddleware,
+  getUserById
+);
+
+router.post(
+  "/logout",
+  logout
+);
+
+router.patch(
+  "/:userId/online",
+  updateOnlineStatus
 );
 
 export default router;
