@@ -4,6 +4,7 @@ import {
   getMessages,
   sendMessage,
   markMessagesRead,
+  pusherAuth
 } from "../controllers/messageController.js";
 
 import authMiddleware from "../middleware/authMiddleware.js";
@@ -33,6 +34,12 @@ router.post(
   "/",
   authMiddleware,
   sendMessage
+);
+
+router.post(
+  "/pusher/auth",
+  authMiddleware,
+  pusherAuth
 );
 
 export default router;
